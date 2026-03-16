@@ -1159,12 +1159,7 @@ class Analyzer(
       // own analysis rules before ResolveInsertInto runs. If they don't, we throw an error.
       case i @ InsertIntoStatement(r: DataSourceV2Relation, _, _, _, _, _, _, _, Some(criteria))
           if i.query.resolved =>
-        criteria match {
-          case _: InsertReplaceOn =>
-            throw QueryCompilationErrors.unsupportedInsertReplaceOn()
-          case _: InsertReplaceUsing =>
-            throw QueryCompilationErrors.unsupportedInsertReplaceUsing()
-        }
+        throw QueryCompilationErrors.unsupportedInsertReplaceOnOrUsing()
 
       case i @ InsertIntoStatement(r: DataSourceV2Relation, _, _, _, _, _, _, _, None)
           if i.query.resolved =>

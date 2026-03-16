@@ -174,7 +174,7 @@ case class QualifiedColType(
  * @param byName               If true, reorder the data columns to match the column names of the
  *                             target table.
  * @param withSchemaEvolution  If true, enables automatic schema evolution for the operation.
- * @param replaceCriteriaOpt  Optional replace criteria for INSERT REPLACE ON/USING operations.
+ * @param replaceCriteriaOpt   Optional replace criteria for INSERT REPLACE ON/USING operations.
  */
 case class InsertIntoStatement(
     table: LogicalPlan,
