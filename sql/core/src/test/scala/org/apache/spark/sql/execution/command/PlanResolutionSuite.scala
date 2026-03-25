@@ -38,7 +38,7 @@ import org.apache.spark.sql.catalyst.util.TypeUtils.toSQLId
 import org.apache.spark.sql.connector.FakeV2Provider
 import org.apache.spark.sql.connector.catalog.{CatalogManager, Column, ColumnDefaultValue, Identifier, SupportsDelete, Table, TableCapability, TableCatalog, TableChange, TableWritePrivilege, V1Table}
 import org.apache.spark.sql.connector.catalog.CatalogManager.SESSION_CATALOG_NAME
-import org.apache.spark.sql.connector.expressions.{LiteralValue, Transform}
+import org.apache.spark.sql.connector.expressions.{FieldReference, IdentityTransform, LiteralValue, Transform}
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.execution.datasources.{CreateTable => CreateTableV1}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -85,6 +85,17 @@ class PlanResolutionSuite extends SharedSparkSession with AnalysisTest {
     when(t.name()).thenReturn("v2TableWithAcceptAnySchemaCapability")
     when(t.columns()).thenReturn(Array(Column.create("i", IntegerType)))
     when(t.capabilities()).thenReturn(Collections.singleton(TableCapability.ACCEPT_ANY_SCHEMA))
+    t
+  }
+
+  // Partitioned table: columns (i INT, s STRING), partitioned by (i)
+  private val partitionedTable: Table = {
+    val t = mock(classOf[SupportsDelete])
+    when(t.columns()).thenReturn(
+      Array(Column.create("i", IntegerType), Column.create("s", StringType)))
+    when(t.partitioning()).thenReturn(
+      Array[Transform](IdentityTransform(FieldReference(Seq("i")))))
+    when(t.name()).thenReturn("ptab")
     t
   }
 
@@ -155,6 +166,7 @@ class PlanResolutionSuite extends SharedSparkSession with AnalysisTest {
         case "tab" => table
         case "tab1" => table1
         case "tab2" => table2
+        case "ptab" => partitionedTable
         case "charvarchar" => charVarcharTable
         case "defaultvalues" => defaultValues
         case "defaultvalues2" => defaultValues2
@@ -1384,6 +1396,58 @@ class PlanResolutionSuite extends SharedSparkSession with AnalysisTest {
           "INSERT INTO testcat.tab AS t BY NAME REPLACE USING (i) SELECT * FROM v2Table")
       }
       assert(ex.getCondition === "INSERT_REPLACE_USING_BY_NAME_NOT_ENABLED")
+    }
+  }
+
+  test("INSERT INTO REPLACE USING falls back to partition overwrite " +
+      "when USING cols match partition cols") {
+    withSQLConf(
+        SQLConf.INSERT_INTO_REPLACE_USING_PARTITION_OVERWRITE_FALLBACK_ENABLED.key -> "true") {
+      // testcat.ptab is partitioned by (i), USING (i) matches exactly
+      val parsed = parseAndResolve(
+        "INSERT INTO testcat.ptab AS t REPLACE USING (i) SELECT * FROM v2Table")
+      assert(parsed.isInstanceOf[OverwritePartitionsDynamic])
+    }
+  }
+
+  test("INSERT INTO REPLACE USING still throws when partition overwrite fallback " +
+      "is enabled but cols don't match partitions") {
+    withSQLConf(
+        SQLConf.INSERT_INTO_REPLACE_USING_PARTITION_OVERWRITE_FALLBACK_ENABLED.key -> "true") {
+      // testcat.tab has no partition columns, so USING (i) does not match
+      checkError(
+        exception = intercept[AnalysisException] {
+          parseAndResolve(
+            "INSERT INTO testcat.tab AS t REPLACE USING (i) SELECT * FROM v2Table")
+        },
+        condition = "UNSUPPORTED_INSERT_REPLACE_ON_OR_USING"
+      )
+    }
+  }
+
+  test("INSERT INTO REPLACE USING with misaligned columns is blocked when disallow is enabled") {
+    withSQLConf(
+        SQLConf.INSERT_INTO_REPLACE_USING_PARTITION_OVERWRITE_FALLBACK_ENABLED.key -> "true",
+        SQLConf.INSERT_INTO_REPLACE_USING_DISALLOW_MISALIGNED_COLUMNS_ENABLED.key -> "true") {
+      // testcat.ptab has columns (i INT, s STRING) partitioned by (i).
+      // v2Table1 (table1) has columns (s STRING, i INT) — different order.
+      // Column i is at position 0 in ptab but position 1 in v2Table1, so it's misaligned.
+      val ex = intercept[AnalysisException] {
+        parseAndResolve(
+          "INSERT INTO testcat.ptab AS t REPLACE USING (i) SELECT * FROM v2Table1")
+      }
+      assert(ex.getCondition === "INSERT_REPLACE_USING_DISALLOW_MISALIGNED_COLUMNS")
+    }
+  }
+
+  test("INSERT INTO REPLACE USING with misaligned columns is allowed when disallow is disabled") {
+    withSQLConf(
+        SQLConf.INSERT_INTO_REPLACE_USING_PARTITION_OVERWRITE_FALLBACK_ENABLED.key -> "true",
+        SQLConf.INSERT_INTO_REPLACE_USING_DISALLOW_MISALIGNED_COLUMNS_ENABLED.key -> "false") {
+      // Same setup but using BY NAME to avoid positional type mismatch
+      val parsed = parseAndResolve(
+        "INSERT INTO testcat.ptab AS t BY NAME REPLACE USING (i) SELECT * FROM v2Table1")
+      assert(parsed.isInstanceOf[OverwritePartitionsDynamic])
     }
   }
 

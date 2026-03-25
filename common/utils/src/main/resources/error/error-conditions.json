@@ -2838,6 +2838,18 @@
     ],
     "sqlState" : "0A000"
   },
+  "INSERT_REPLACE_USING_DISALLOW_MISALIGNED_COLUMNS" : {
+    "message" : [
+      "INSERT INTO ... REPLACE USING contains misaligned columns: <misalignedReplaceUsingCols>. These columns appear at different positions in the target and source schemas."
+    ],
+    "sqlState" : "42000"
+  },
+  "INSERT_REPLACE_USING_INVALID_SET_OF_COLUMNS" : {
+    "message" : [
+      "INSERT INTO ... REPLACE USING specifies non-partition columns: <nonPartitionColumns>. Missing partition columns: <missingPartitionsColumns>."
+    ],
+    "sqlState" : "42000"
+  },
   "INSERT_REPLACE_USING_NOT_ENABLED" : {
     "message" : [
       "INSERT INTO ... REPLACE USING is not enabled. Set 'spark.sql.insertIntoReplaceUsing.enabled' to true to enable it."
@@ -7127,6 +7139,12 @@
         ]
       }
     },
+    "sqlState" : "42703"
+  },
+  "UNRESOLVED_INSERT_REPLACE_USING_COLUMN" : {
+    "message" : [
+      "Cannot resolve column <colName> in INSERT REPLACE USING for the <relationType>. Available columns: <suggestion>."
+    ],
     "sqlState" : "42703"
   },
   "UNRESOLVED_MAP_KEY" : {

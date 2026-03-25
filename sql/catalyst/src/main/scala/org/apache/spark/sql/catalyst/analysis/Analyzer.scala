@@ -1152,6 +1152,55 @@ class Analyzer(
   object ResolveInsertInto extends ResolveInsertionBase {
     override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsWithPruning(
       AlwaysProcess.fn, ruleId) {
+      // When REPLACE USING columns match the table's partition columns exactly,
+      // fall back to dynamic partition overwrite as an equivalent optimization.
+      case i: InsertIntoStatement
+          if conf.getConf(
+              SQLConf.INSERT_INTO_REPLACE_USING_PARTITION_OVERWRITE_FALLBACK_ENABLED) &&
+            i.table.isInstanceOf[DataSourceV2Relation] &&
+            i.query.resolved &&
+            i.replaceCriteriaOpt.isDefined &&
+            i.replaceCriteriaOpt.get.isInstanceOf[InsertReplaceUsing] &&
+            i.replaceCriteriaOpt.get.asInstanceOf[InsertReplaceUsing].cols.sorted ==
+              partitionColumnNames(
+                i.table.asInstanceOf[DataSourceV2Relation].table).sorted =>
+        val replaceUsingCols = i.replaceCriteriaOpt.get.asInstanceOf[InsertReplaceUsing].cols
+        val tableRelation = i.table.asInstanceOf[DataSourceV2Relation]
+
+        def checkColumnExistenceIn(relation: LogicalPlan, relationType: String): Unit = {
+          replaceUsingCols.foreach { replaceUsingCol =>
+            if (!relation.output.exists(attr =>
+                conf.resolver(attr.name, replaceUsingCol))) {
+              throw QueryCompilationErrors.unresolvedInsertReplaceUsingColumnsError(
+                colName = replaceUsingCol,
+                relationType = relationType,
+                suggestion = relation.schema.fieldNames.sorted.map(toSQLId).mkString(", "))
+            }
+          }
+        }
+
+        checkColumnExistenceIn(relation = tableRelation, relationType = "table")
+        checkColumnExistenceIn(relation = i.query, relationType = "query")
+
+        InsertReplaceUsingMisalignedColumnsCheck.checkMisalignedReplaceUsingCols(
+          conf.resolver,
+          replaceUsingCols,
+          tableRelation = tableRelation,
+          queryRelation = i.query,
+          isByName = i.byName,
+          conf = conf)
+
+        val schemaEvolutionWriteOption: Map[String, String] =
+          if (i.withSchemaEvolution) Map("mergeSchema" -> "true") else Map.empty
+        val writeOptions =
+          Map("useNullIntolerantEqualityWithDPO" -> "true") ++ schemaEvolutionWriteOption
+
+        if (i.byName) {
+          OverwritePartitionsDynamic.byName(tableRelation, df = i.query, writeOptions)
+        } else {
+          OverwritePartitionsDynamic.byPosition(tableRelation, query = i.query, writeOptions)
+        }
+
       case i: InsertIntoStatement
           if i.table.isInstanceOf[DataSourceV2Relation] &&
             i.query.resolved &&

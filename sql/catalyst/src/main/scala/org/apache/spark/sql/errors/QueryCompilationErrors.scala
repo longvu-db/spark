@@ -597,6 +597,34 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase with Compilat
       messageParameters = Map.empty)
   }
 
+  def unresolvedInsertReplaceUsingColumnsError(
+      colName: String, relationType: String, suggestion: String): Throwable = {
+    new AnalysisException(
+      errorClass = "UNRESOLVED_INSERT_REPLACE_USING_COLUMN",
+      messageParameters = Map(
+        "colName" -> toSQLId(colName),
+        "relationType" -> relationType,
+        "suggestion" -> suggestion))
+  }
+
+  def disallowInsertReplaceUsingWithMisalignedColumns(
+      misalignedReplaceUsingCols: Seq[String]): Throwable = {
+    new AnalysisException(
+      errorClass = "INSERT_REPLACE_USING_DISALLOW_MISALIGNED_COLUMNS",
+      messageParameters = Map(
+        "misalignedReplaceUsingCols" ->
+          misalignedReplaceUsingCols.map(toSQLId).mkString(", ")))
+  }
+
+  def insertReplaceUsingInvalidSetOfColumnsError(
+      nonPartitionColumns: Seq[String], missingPartitionsColumns: Seq[String]): Throwable = {
+    new AnalysisException(
+      errorClass = "INSERT_REPLACE_USING_INVALID_SET_OF_COLUMNS",
+      messageParameters = Map(
+        "nonPartitionColumns" -> nonPartitionColumns.mkString(", "),
+        "missingPartitionsColumns" -> missingPartitionsColumns.mkString(", ")))
+  }
+
   def writeIntoViewNotAllowedError(identifier: TableIdentifier, t: TreeNode[_]): Throwable = {
     new AnalysisException(
       errorClass = "VIEW_WRITE_NOT_ALLOWED",

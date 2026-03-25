@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Refreshing and Pinning Tables in Spark - PRs and Code Pointers (aokolnychyi)</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; line-height: 1.5; }
+  h1 { font-size: 22px; border-bottom: 2px solid #333; padding-bottom: 8px; }
+  h2 { font-size: 18px; margin-top: 30px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  h3 { font-size: 15px; margin-top: 20px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 20px 0; font-size: 13px; }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background-color: #f0f0f0; font-weight: bold; }
+  a { color: #1a73e8; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { background: #f4f4f4; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+  .note { background: #fff8e1; border-left: 4px solid #ffc107; padding: 10px 14px; margin: 16px 0; font-size: 13px; }
+  .section-label { display: inline-block; background: #e8f0fe; color: #1a73e8; font-size: 11px; padding: 2px 6px; border-radius: 3px; margin-left: 6px; }
+</style>
+</head>
+<body>
+
+<h1>Refreshing and Pinning Tables in Spark - PRs &amp; Code Pointers</h1>
+<p><strong>Author:</strong> Anton Okolnychyi (aokolnychyi)<br>
+<strong>Repository:</strong> apache/spark (no PRs found in databricks-eng/universe)<br>
+<strong>Generated:</strong> 2026-03-24</p>
+
+<!-- ============================================================ -->
+<h2>PRs Authored by aokolnychyi - Directly Related to Design Doc</h2>
+
+<h3>Section [1]: Temp Views with Stored Plans <span class="section-label">Reload DSv2 tables in views</span></h3>
+<table>
+  <tr><th>PR</th><th>Title</th><th>Status</th></tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/52876">#52876</a></td>
+    <td>[SPARK-53924] Reload DSv2 tables in views created using plans on each view access</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53450">#53450</a></td>
+    <td>[SPARK-54686] Relax DSv2 table checks in temp views to allow new top-level columns</td>
+    <td>Merged</td>
+  </tr>
+</table>
+
+<h3>Section [2]: Repeated Table Access / Table Resolution</h3>
+<table>
+  <tr><th>PR</th><th>Title</th><th>Status</th></tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/52781">#52781</a></td>
+    <td>[SPARK-53905] Refactor RelationResolution to enable code reuse</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/52460">#52460</a></td>
+    <td>[SPARK-53720] Simplify extracting Table from DataSourceV2Relation</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/52442">#52442</a></td>
+    <td>[SPARK-53700] Remove redundancy in DataSourceV2RelationBase.simpleString</td>
+    <td>Merged</td>
+  </tr>
+</table>
+
+<h3>Section [3]: Incrementally Constructed Queries <span class="section-label">Version consistency checks</span></h3>
+<table>
+  <tr><th>PR</th><th>Title</th><th>Status</th></tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53202">#53202</a></td>
+    <td>[SPARK-54444] Relax DSv2 table checks to restore previous behavior</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53115">#53115</a></td>
+    <td>[SPARK-54436] Fix error formatting for incompatible table metadata checks</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53214">#53214</a></td>
+    <td>[SPARK-54504] Fix version refresh for DSv2 tables with subqueries</td>
+    <td>Merged</td>
+  </tr>
+</table>
+
+<h3>Section [4]: Version Pinning and Refresh in Dataset</h3>
+<table>
+  <tr><th>PR</th><th>Title</th><th>Status</th></tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/52920">#52920</a></td>
+    <td>[SPARK-54157] Fix refresh of DSv2 tables in Dataset</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53118">#53118</a></td>
+    <td>[SPARK-51771][FOLLOWUP] Rename currentVersion to version in DSv2 Table</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/52599">#52599</a></td>
+    <td>[SPARK-53732] Remember TimeTravelSpec in DataSourceV2Relation</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53048">#53048</a></td>
+    <td>[SPARK-54341] Remember TimeTravelSpec for tables loaded via TableProvider</td>
+    <td>Merged</td>
+  </tr>
+</table>
+
+<h3>Section [5]: CACHE TABLE Impact</h3>
+<table>
+  <tr><th>PR</th><th>Title</th><th>Status</th></tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/52764">#52764</a></td>
+    <td>[SPARK-54022] Make DSv2 table resolution aware of cached tables</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53109">#53109</a></td>
+    <td>[SPARK-54387] Fix recaching of DSv2 tables</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53143">#53143</a></td>
+    <td>[SPARK-54424] Failures during recaching must not fail operations</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/52712">#52712</a></td>
+    <td>[SPARK-54004] Fix uncaching table by name without cascading</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/54427">#54427</a></td>
+    <td>[SPARK-55631] ALTER TABLE must invalidate cache for DSv2 tables</td>
+    <td>Merged</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>PRs Reviewed by aokolnychyi (Related Topics)</h2>
+<table>
+  <tr><th>PR</th><th>Title</th><th>Author</th></tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53646">#53646</a></td>
+    <td>[SPARK-54873] Simplify V2TableReference resolution as only temp view may contain it</td>
+    <td>other</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53103">#53103</a></td>
+    <td>[SPARK-53924][FOLLOWUP] Add tests for cached temp view detecting schema changes</td>
+    <td>other</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/53196">#53196</a></td>
+    <td>[SPARK-54491] Fix insert into temp view on DSv2 table failure</td>
+    <td>other</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/54809">#54809</a></td>
+    <td>[SPARK-33902] Support CREATE TABLE LIKE for V2</td>
+    <td>other</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/54642">#54642</a></td>
+    <td>[SPARK-55855] DSv2 Transaction API foundations</td>
+    <td>andreaschat-db</td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>Other DSv2-related PRs by aokolnychyi</h2>
+<table>
+  <tr><th>PR</th><th>Title</th><th>Status</th></tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/54773">#54773</a></td>
+    <td>[SPARK-55976] Use Set instead of Seq for write privileges</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/54492">#54492</a></td>
+    <td>[SPARK-55695] Avoid double planning in row-level operations</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/54416">#54416</a></td>
+    <td>[SPARK-55626] Don't load metadata columns on Table unless needed</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/52424">#52424</a></td>
+    <td>[SPARK-53667] Fix EXPLAIN for CALL with IDENTIFIER</td>
+    <td>Merged</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/apache/spark/pull/54433">#54433</a></td>
+    <td>[SPARK-55626][4.1] Don't load metadata columns on Table unless needed in V2TableUtil</td>
+    <td><strong>Open</strong></td>
+  </tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>Key Code Pointers</h2>
+
+<h3>Core Refresh Infrastructure</h3>
+<table>
+  <tr><th>File</th><th>Lines</th><th>Description</th></tr>
+  <tr>
+    <td><code>sql/core/.../v2/V2TableRefreshUtil.scala</code></td>
+    <td>33-150</td>
+    <td>Central utility for refreshing DSv2 table metadata. <code>refresh()</code> reloads from catalog, validates table identity and schema. Checks <code>table.version</code> for versioned tables.</td>
+  </tr>
+  <tr>
+    <td><code>sql/core/.../execution/QueryExecution.scala</code></td>
+    <td>210-216</td>
+    <td><code>lazyTableVersionsRefreshed</code>: new phase after analysis that calls <code>V2TableRefreshUtil.refresh(..., versionedOnly=true)</code></td>
+  </tr>
+  <tr>
+    <td><code>sql/core/.../v2/RefreshTableExec.scala</code></td>
+    <td>24-38</td>
+    <td>Physical execution plan for <code>REFRESH TABLE</code> command</td>
+  </tr>
+</table>
+
+<h3>Temp Views with Stored Plans (Section [1])</h3>
+<table>
+  <tr><th>File</th><th>Lines</th><th>Description</th></tr>
+  <tr>
+    <td><code>sql/catalyst/.../analysis/V2TableReference.scala</code></td>
+    <td>52-100</td>
+    <td>Core node replacing <code>DataSourceV2Relation</code> in temp views, enabling table reload on each view access</td>
+  </tr>
+  <tr>
+    <td><code>sql/catalyst/.../analysis/RelationResolution.scala</code></td>
+    <td>50-200</td>
+    <td>Resolution logic that detects <code>V2TableReference</code> and calls <code>TableCatalog.load</code></td>
+  </tr>
+</table>
+
+<h3>Cache Table Pinning (Section [5])</h3>
+<table>
+  <tr><th>File</th><th>Lines</th><th>Description</th></tr>
+  <tr>
+    <td><code>sql/core/.../execution/CacheManager.scala</code></td>
+    <td>350-435</td>
+    <td><code>recacheTableOrView()</code>, <code>tryRefreshPlan()</code> - re-caches entries, checks table ID for refresh</td>
+  </tr>
+  <tr>
+    <td><code>sql/catalyst/.../catalog/CatalogV2Util.scala</code></td>
+    <td>501-520</td>
+    <td><code>isSameTable()</code> and <code>lookupCachedRelation()</code> - prevents stale cache hits via <code>table.id</code></td>
+  </tr>
+  <tr>
+    <td><code>sql/catalyst/.../analysis/RelationCache.scala</code></td>
+    <td>22-28</td>
+    <td>Trait for relation cache lookups</td>
+  </tr>
+</table>
+
+<h3>DSv2 Relation &amp; Strategy</h3>
+<table>
+  <tr><th>File</th><th>Lines</th><th>Description</th></tr>
+  <tr>
+    <td><code>sql/catalyst/.../v2/DataSourceV2Relation.scala</code></td>
+    <td>52-145</td>
+    <td>Core <code>DataSourceV2Relation</code> with <code>timeTravelSpec</code> and <code>isVersioned</code></td>
+  </tr>
+  <tr>
+    <td><code>sql/core/.../v2/DataSourceV2Strategy.scala</code></td>
+    <td>76-98</td>
+    <td><code>recacheTable()</code> and <code>invalidateTableCache()</code> callbacks</td>
+  </tr>
+</table>
+
+<h3>Table ID (implemented) vs Column ID (not yet)</h3>
+<table>
+  <tr><th>File</th><th>Lines</th><th>Description</th></tr>
+  <tr>
+    <td><code>sql/catalyst/.../connector/catalog/Table.java</code></td>
+    <td>53-61</td>
+    <td><code>Table.id()</code> - returns table ID (null by default, connectors opt-in). Used for drop+recreate detection.</td>
+  </tr>
+</table>
+
+<div class="note">
+  <strong>Column ID:</strong> The design doc mentions "introducing the notion of column ID in Spark" as future work (targeted for 4.2). Currently Spark resolves columns by name only. Iceberg and Delta track column IDs internally but Spark does not consume them at the DSv2 API level. No PRs exist for this yet.
+</div>
+
+<!-- ============================================================ -->
+<h2>Test Suites</h2>
+<table>
+  <tr><th>File</th><th>Key Lines</th><th>What's Tested</th></tr>
+  <tr>
+    <td><code>sql/core/.../connector/DataSourceV2DataFrameSuite.scala</code></td>
+    <td>1509-1737, 1786-1817, 1850+</td>
+    <td>SPARK-53924 (temp views), SPARK-54022 (cache pins), SPARK-54504 (subqueries)</td>
+  </tr>
+  <tr>
+    <td><code>sql/core/.../sql/CachedTableSuite.scala</code></td>
+    <td>2464-2540, 2569+</td>
+    <td>SPARK-53924 (cache invalidation), SPARK-54022 (CACHE TABLE pins)</td>
+  </tr>
+  <tr>
+    <td><code>sql/catalyst/.../catalog/InMemoryTableCatalog.scala</code></td>
+    <td>86-107</td>
+    <td><code>pinTable()</code> and <code>loadTable(version)</code> for testing version pinning</td>
+  </tr>
+</table>
+
+</body>
+</html>

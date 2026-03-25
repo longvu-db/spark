@@ -4859,6 +4859,31 @@ object SQLConf {
       .booleanConf
       .createWithDefault(true)
 
+  val INSERT_INTO_REPLACE_USING_DISALLOW_MISALIGNED_COLUMNS_ENABLED =
+    buildConf("spark.sql.insertIntoReplaceUsing.disallowMisalignedColumns.enabled")
+      .doc(
+        """
+          |Disallow instances of INSERT INTO ... REPLACE USING (...) that contains a column in the
+          |USING clause appearing at different positions in the target and source schemas.
+          |For example, column 'b' is at position 1 in tgt(a, b) and position 0 in src(b, c).
+          |""".stripMargin)
+      .internal()
+      .booleanConf
+      .createWithDefault(false)
+
+  val INSERT_INTO_REPLACE_USING_PARTITION_OVERWRITE_FALLBACK_ENABLED =
+    buildConf("spark.sql.insertIntoReplaceUsing.partitionOverwriteFallback.enabled")
+      .doc(
+        """
+          |When enabled, if the target table is a partitioned table and the USING clause
+          |specifies the full set of table's partition columns, then the dynamic partition
+          |overwrite code path in the Analyzer is used instead of the table-format-specific
+          |REPLACE USING implementation.
+          |""".stripMargin)
+      .internal()
+      .booleanConf
+      .createWithDefault(false)
+
   object StoreAssignmentPolicy extends Enumeration {
     val ANSI, LEGACY, STRICT = Value
   }

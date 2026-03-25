@@ -21,7 +21,8 @@ import org.apache.spark.sql.catalyst.analysis.{FieldName, FieldPosition}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, Unevaluable}
 import org.apache.spark.sql.catalyst.trees.{LeafLike, UnaryLike}
 import org.apache.spark.sql.connector.catalog.ColumnDefaultValue
-import org.apache.spark.sql.errors.QueryExecutionErrors
+import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.DataType
 
 /**
@@ -222,3 +223,50 @@ case class InsertReplaceUsing(cols: Seq[String]) extends InsertReplaceCriteria
 case class InsertReplaceOn(
     cond: Expression,
     tableAliasOpt: Option[String]) extends InsertReplaceCriteria
+
+/**
+ * Utility object for detecting and handling misaligned REPLACE USING columns.
+ *
+ * Misaligned column checks are only needed for positional INSERT REPLACE USING statements,
+ * where the column matching is by name and the column insertion is positional.
+ * It is not always clear to the users whether a USING column refers to the same-named column
+ * or the positionally-aligned column when they differ. For BY NAME inserts,
+ * both the matching and the insertion are by name, so the command semantics are clear.
+ */
+object InsertReplaceUsingMisalignedColumnsCheck {
+
+  def checkMisalignedReplaceUsingCols(
+      resolver: (String, String) => Boolean,
+      replaceUsingCols: Seq[String],
+      tableRelation: LogicalPlan,
+      queryRelation: LogicalPlan,
+      isByName: Boolean,
+      conf: SQLConf): Unit = {
+    if (!isByName &&
+        conf.getConf(SQLConf.INSERT_INTO_REPLACE_USING_DISALLOW_MISALIGNED_COLUMNS_ENABLED)) {
+      val misalignedCols = getMisalignedReplaceUsingCols(
+        resolver, replaceUsingCols,
+        tableRelation = tableRelation,
+        queryRelation = queryRelation)
+      if (misalignedCols.nonEmpty) {
+        throw QueryCompilationErrors.disallowInsertReplaceUsingWithMisalignedColumns(
+          misalignedReplaceUsingCols = misalignedCols)
+      }
+    }
+  }
+
+  private def getMisalignedReplaceUsingCols(
+      resolver: (String, String) => Boolean,
+      replaceUsingCols: Seq[String],
+      tableRelation: LogicalPlan,
+      queryRelation: LogicalPlan): Seq[String] = {
+    replaceUsingCols.collect {
+      case replaceUsingCol
+        if (tableRelation.output.indexWhere(
+              attr => resolver(attr.name, replaceUsingCol)) !=
+            queryRelation.output.indexWhere(
+              attr => resolver(attr.name, replaceUsingCol))) =>
+        replaceUsingCol
+    }
+  }
+}
