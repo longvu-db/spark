@@ -33,7 +33,7 @@ import org.apache.spark.sql.catalyst.CurrentUserContext.CURRENT_USER
 import org.apache.spark.sql.catalyst.analysis.{CannotReplaceMissingTableException, NoSuchNamespaceException, TableAlreadyExistsException}
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable, CatalogTableType, CatalogUtils}
 import org.apache.spark.sql.catalyst.parser.ParseException
-import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
+import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, OverwritePartitionsDynamic}
 import org.apache.spark.sql.catalyst.statsEstimation.StatsEstimationTestBase
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.connector.catalog.{Column => ColumnV2, _}
@@ -1450,6 +1450,165 @@ class DataSourceV2SQLSuiteV1Filter
           "tableName" -> "`testcat`.`ns`.`t`",
           "operation" -> "INSERT INTO ... REPLACE ON/USING")
       )
+    }
+  }
+
+  test("INSERT REPLACE USING with NULL partition values") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string, part bigint) " +
+        s"USING $v2Format PARTITIONED BY (part)")
+      sql(s"INSERT INTO $t VALUES (1, 'a', null), (2, 'b', 1), (3, 'c', 1)")
+
+      // The write option useNullIntolerantEqualityWithDPO=true is passed so connectors
+      // CAN implement null-intolerant equality (NULL != NULL). Whether they do is
+      // connector-specific. The InMemoryTable connector uses standard DPO behavior.
+      sql(s"INSERT INTO $t REPLACE USING (part) " +
+        s"SELECT * FROM VALUES (10, 'x', null), (20, 'y', 1) AS source(id, data, part)")
+      checkAnswer(
+        sql(s"SELECT * FROM $t"),
+        Row(10, "x", null) :: Row(20, "y", 1) :: Nil)
+    }
+  }
+
+  test("INSERT REPLACE USING with multiple partition columns") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (data string, p1 bigint, p2 bigint) " +
+        s"USING $v2Format PARTITIONED BY (p1, p2)")
+      sql(s"INSERT INTO $t VALUES ('a', 1, 1), ('b', 1, 2), ('c', 2, 1)")
+
+      sql(s"INSERT INTO $t REPLACE USING (p1, p2) " +
+        s"SELECT * FROM VALUES ('x', 1, 1), ('y', 3, 3) AS source(data, p1, p2)")
+      checkAnswer(
+        sql(s"SELECT * FROM $t"),
+        Row("x", 1, 1) :: Row("b", 1, 2) :: Row("c", 2, 1) :: Row("y", 3, 3) :: Nil)
+    }
+  }
+
+  test("INSERT REPLACE USING with reversed partition column order in USING clause") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (data string, p1 bigint, p2 bigint) " +
+        s"USING $v2Format PARTITIONED BY (p1, p2)")
+      sql(s"INSERT INTO $t VALUES ('a', 1, 1), ('b', 1, 2), ('c', 2, 1)")
+
+      // USING (p2, p1) should still match since it's the full set of partition columns
+      sql(s"INSERT INTO $t REPLACE USING (p2, p1) " +
+        s"SELECT * FROM VALUES ('x', 1, 1), ('y', 3, 3) AS source(data, p1, p2)")
+      checkAnswer(
+        sql(s"SELECT * FROM $t"),
+        Row("x", 1, 1) :: Row("b", 1, 2) :: Row("c", 2, 1) :: Row("y", 3, 3) :: Nil)
+    }
+  }
+
+  test("INSERT REPLACE USING on empty table appends all rows") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string, part bigint) " +
+        s"USING $v2Format PARTITIONED BY (part)")
+
+      sql(s"INSERT INTO $t REPLACE USING (part) " +
+        s"SELECT * FROM VALUES (1, 'a', 1), (2, 'b', 2) AS source(id, data, part)")
+      checkAnswer(
+        sql(s"SELECT * FROM $t"),
+        Row(1, "a", 1) :: Row(2, "b", 2) :: Nil)
+    }
+  }
+
+  test("INSERT REPLACE USING: partitionOverwriteMode config does not affect behavior") {
+    val t = "testcat.ns.t"
+    for (mode <- Seq("static", "dynamic")) {
+      withSQLConf(SQLConf.PARTITION_OVERWRITE_MODE.key -> mode) {
+        withTable(t) {
+          sql(s"CREATE TABLE $t (id bigint, data string, part bigint) " +
+            s"USING $v2Format PARTITIONED BY (part)")
+          sql(s"INSERT INTO $t VALUES (1, 'a', 1), (2, 'b', 2)")
+
+          sql(s"INSERT INTO $t REPLACE USING (part) " +
+            s"SELECT * FROM VALUES (10, 'x', 1) AS source(id, data, part)")
+          checkAnswer(
+            sql(s"SELECT * FROM $t"),
+            Row(10, "x", 1) :: Row(2, "b", 2) :: Nil)
+        }
+      }
+    }
+  }
+
+  test("INSERT REPLACE USING: case-insensitive column matching") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string, Part bigint) " +
+        s"USING $v2Format PARTITIONED BY (Part)")
+      sql(s"INSERT INTO $t VALUES (1, 'a', 1), (2, 'b', 2)")
+
+      // USING (PART) should match partition column Part case-insensitively
+      sql(s"INSERT INTO $t REPLACE USING (PART) " +
+        s"SELECT * FROM VALUES (10, 'x', 1) AS source(id, data, Part)")
+      checkAnswer(
+        sql(s"SELECT * FROM $t"),
+        Row(10, "x", 1) :: Row(2, "b", 2) :: Nil)
+    }
+  }
+
+  test("INSERT REPLACE USING: multiple partition columns with NULL combinations") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (data string, p1 bigint, p2 bigint) " +
+        s"USING $v2Format PARTITIONED BY (p1, p2)")
+      sql(s"INSERT INTO $t VALUES ('a', null, null), ('b', 1, null), ('c', 1, 2), ('d', 1, 3)")
+
+      sql(s"INSERT INTO $t REPLACE USING (p1, p2) " +
+        s"SELECT * FROM VALUES " +
+        s"('x', null, null), ('y', 1, null), ('z', null, 1), ('w', 1, 2), ('v', 2, 3) " +
+        s"AS source(data, p1, p2)")
+
+      // The InMemoryTable connector uses standard DPO (NULL = NULL for partitioning).
+      // Connectors that honor useNullIntolerantEqualityWithDPO may treat NULL != NULL.
+      checkAnswer(
+        sql(s"SELECT * FROM $t"),
+        Row("x", null, null) ::
+          Row("y", 1, null) ::
+          Row("z", null, 1) ::
+          Row("w", 1, 2) ::
+          Row("d", 1, 3) ::
+          Row("v", 2, 3) ::
+          Nil)
+    }
+  }
+
+  test("INSERT REPLACE USING: verifies DPO write options are set") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string, part bigint) " +
+        s"USING $v2Format PARTITIONED BY (part)")
+
+      val df = sql(s"INSERT INTO $t REPLACE USING (part) " +
+        s"SELECT * FROM VALUES (1, 'a', 1) AS source(id, data, part)")
+      val dpoNodes = df.queryExecution.analyzed.collect {
+        case o: OverwritePartitionsDynamic
+          if o.writeOptions.get("useNullIntolerantEqualityWithDPO").contains("true") => o
+      }
+      assert(dpoNodes.length === 1,
+        "Expected OverwritePartitionsDynamic with useNullIntolerantEqualityWithDPO=true")
+    }
+  }
+
+  test("INSERT REPLACE USING WITH SCHEMA EVOLUTION sets mergeSchema write option") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string, part bigint) " +
+        s"USING $v2Format PARTITIONED BY (part)")
+
+      val df = sql(s"INSERT WITH SCHEMA EVOLUTION INTO $t REPLACE USING (part) " +
+        s"SELECT * FROM VALUES (1, 'a', 1) AS source(id, data, part)")
+      val dpoNodes = df.queryExecution.analyzed.collect {
+        case o: OverwritePartitionsDynamic
+          if o.writeOptions.get("useNullIntolerantEqualityWithDPO").contains("true") &&
+            o.writeOptions.get("mergeSchema").contains("true") => o
+      }
+      assert(dpoNodes.length === 1,
+        "Expected OverwritePartitionsDynamic with mergeSchema=true")
     }
   }
 
