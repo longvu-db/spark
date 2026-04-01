@@ -1344,6 +1344,115 @@ class DataSourceV2SQLSuiteV1Filter
     }
   }
 
+  test("INSERT REPLACE USING with partition columns uses dynamic partition overwrite") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string, part bigint) " +
+        s"USING $v2Format PARTITIONED BY (part)")
+      sql(s"INSERT INTO $t VALUES (1, 'a', 1), (2, 'b', 2), (3, 'c', 1)")
+      checkAnswer(
+        sql(s"SELECT * FROM $t"),
+        Row(1, "a", 1) :: Row(2, "b", 2) :: Row(3, "c", 1) :: Nil)
+
+      // REPLACE USING (part) should only overwrite partition 1, leaving partition 2 untouched
+      sql(s"INSERT INTO $t REPLACE USING (part) " +
+        s"SELECT * FROM VALUES (10, 'x', 1) AS source(id, data, part)")
+      checkAnswer(
+        sql(s"SELECT * FROM $t"),
+        Row(10, "x", 1) :: Row(2, "b", 2) :: Nil)
+    }
+  }
+
+  test("INSERT REPLACE USING BY NAME with partition columns") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string, part bigint) " +
+        s"USING $v2Format PARTITIONED BY (part)")
+      sql(s"INSERT INTO $t VALUES (1, 'a', 1), (2, 'b', 2)")
+
+      // BY NAME with different column order
+      sql(s"INSERT INTO $t BY NAME REPLACE USING (part) " +
+        s"SELECT 1 AS part, 10 AS id, 'x' AS data")
+      checkAnswer(
+        sql(s"SELECT * FROM $t"),
+        Row(10, "x", 1) :: Row(2, "b", 2) :: Nil)
+    }
+  }
+
+  test("INSERT REPLACE USING with non-partition columns is unsupported") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string, part bigint) " +
+        s"USING $v2Format PARTITIONED BY (part)")
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql(s"INSERT INTO $t REPLACE USING (id) " +
+            s"SELECT * FROM VALUES (1, 'a', 1) AS source(id, data, part)")
+        },
+        condition = "UNSUPPORTED_FEATURE.TABLE_OPERATION",
+        sqlState = "0A000",
+        parameters = Map(
+          "tableName" -> "`testcat`.`ns`.`t`",
+          "operation" -> "INSERT INTO ... REPLACE ON/USING")
+      )
+    }
+  }
+
+  test("INSERT REPLACE USING with partial partition columns is unsupported") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string, p1 bigint, p2 bigint) " +
+        s"USING $v2Format PARTITIONED BY (p1, p2)")
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql(s"INSERT INTO $t REPLACE USING (p1) " +
+            s"SELECT * FROM VALUES (1, 'a', 1, 1) AS source(id, data, p1, p2)")
+        },
+        condition = "UNSUPPORTED_FEATURE.TABLE_OPERATION",
+        sqlState = "0A000",
+        parameters = Map(
+          "tableName" -> "`testcat`.`ns`.`t`",
+          "operation" -> "INSERT INTO ... REPLACE ON/USING")
+      )
+    }
+  }
+
+  test("INSERT REPLACE ON is still unsupported for V2 tables") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string) USING $v2Format")
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql(s"INSERT INTO $t AS target REPLACE ON target.id = 1 " +
+            s"SELECT * FROM VALUES (1, 'a') AS source(id, data)")
+        },
+        condition = "UNSUPPORTED_FEATURE.TABLE_OPERATION",
+        sqlState = "0A000",
+        parameters = Map(
+          "tableName" -> "`testcat`.`ns`.`t`",
+          "operation" -> "INSERT INTO ... REPLACE ON/USING")
+      )
+    }
+  }
+
+  test("INSERT REPLACE USING on unpartitioned table is unsupported") {
+    val t = "testcat.ns.t"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string) USING $v2Format")
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql(s"INSERT INTO $t REPLACE USING (id) " +
+            s"SELECT * FROM VALUES (1, 'a') AS source(id, data)")
+        },
+        condition = "UNSUPPORTED_FEATURE.TABLE_OPERATION",
+        sqlState = "0A000",
+        parameters = Map(
+          "tableName" -> "`testcat`.`ns`.`t`",
+          "operation" -> "INSERT INTO ... REPLACE ON/USING")
+      )
+    }
+  }
+
   test("insertInto: static partition column name should not be used in the column list") {
     withTable("t") {
       sql(s"CREATE TABLE t(i STRING, c string) USING $v2Format PARTITIONED BY (c)")
