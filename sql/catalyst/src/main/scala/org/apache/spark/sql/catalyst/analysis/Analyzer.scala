@@ -1184,6 +1184,11 @@ class Analyzer(
           }
         }
 
+        // The table must support dynamic partition overwrite for REPLACE USING.
+        if (!r.table.capabilities().contains(TableCapability.OVERWRITE_DYNAMIC)) {
+          throw QueryCompilationErrors.unsupportedInsertReplaceOnOrUsing(r.table.name())
+        }
+
         val writeOptions: Map[String, String] =
           Map("useNullIntolerantEqualityWithDPO" -> "true") ++
           (if (i.withSchemaEvolution) Map("mergeSchema" -> "true") else Map.empty)

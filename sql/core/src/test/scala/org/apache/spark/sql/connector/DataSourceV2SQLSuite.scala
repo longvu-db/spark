@@ -40,6 +40,8 @@ import org.apache.spark.sql.connector.catalog.{Column => ColumnV2, _}
 import org.apache.spark.sql.connector.catalog.CatalogManager.SESSION_CATALOG_NAME
 import org.apache.spark.sql.connector.catalog.CatalogV2Util.withDefaultOwnership
 import org.apache.spark.sql.connector.expressions.{LiteralValue, Transform}
+import org.apache.spark.sql.connector.read.ScanBuilder
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
 import org.apache.spark.sql.errors.QueryErrorsBase
 import org.apache.spark.sql.execution.FilterExec
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
@@ -51,6 +53,7 @@ import org.apache.spark.sql.internal.{SQLConf, StaticSQLConf}
 import org.apache.spark.sql.internal.SQLConf.{PARTITION_OVERWRITE_MODE, PartitionOverwriteMode, V2_SESSION_CATALOG_IMPLEMENTATION}
 import org.apache.spark.sql.sources.SimpleScanSource
 import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.UTF8String
 
 abstract class DataSourceV2SQLSuite
@@ -1432,6 +1435,28 @@ class DataSourceV2SQLSuiteV1Filter
           "tableName" -> "`testcat`.`ns`.`t`",
           "operation" -> "INSERT INTO ... REPLACE ON/USING")
       )
+    }
+  }
+
+  test("INSERT REPLACE USING on V2 table without dynamic overwrite support is unsupported") {
+    val noDpoCatalog = classOf[NoDynamicOverwriteCatalog].getName
+    withSQLConf(s"spark.sql.catalog.nodpo" -> noDpoCatalog) {
+      val t = "nodpo.ns.t"
+      withTable(t) {
+        sql(s"CREATE TABLE $t (id bigint, data string, part bigint) " +
+          s"USING $v2Format PARTITIONED BY (part)")
+        checkError(
+          exception = intercept[AnalysisException] {
+            sql(s"INSERT INTO $t REPLACE USING (part) " +
+              s"SELECT * FROM VALUES (1, 'a', 1) AS source(id, data, part)")
+          },
+          condition = "UNSUPPORTED_FEATURE.TABLE_OPERATION",
+          sqlState = "0A000",
+          parameters = Map(
+            "tableName" -> "`nodpo`.`ns`.`t`",
+            "operation" -> "INSERT INTO ... REPLACE ON/USING")
+        )
+      }
     }
   }
 
@@ -4635,6 +4660,38 @@ class V2CatalogSupportBuiltinDataSource extends InMemoryCatalog {
       ident: Identifier,
       writePrivileges: util.Set[TableWritePrivilege]): Table = {
     loadTable(ident)
+  }
+}
+
+/** A catalog whose tables do not support dynamic partition overwrite. */
+class NoDynamicOverwriteCatalog extends InMemoryTableCatalog {
+  import org.apache.spark.sql.connector.catalog.TableCapability._
+
+  private def wrapTable(base: Table): Table = new NoDynamicOverwriteTable(base)
+
+  override def loadTable(ident: Identifier): Table = wrapTable(super.loadTable(ident))
+
+  override def loadTable(
+      ident: Identifier,
+      writePrivileges: java.util.Set[TableWritePrivilege]): Table = {
+    wrapTable(super.loadTable(ident, writePrivileges))
+  }
+
+  private class NoDynamicOverwriteTable(delegate: Table) extends Table
+      with SupportsRead with SupportsWrite {
+    override def name(): String = delegate.name()
+    override def columns(): Array[ColumnV2] = delegate.columns()
+    override def partitioning(): Array[Transform] = delegate.partitioning()
+    override def properties(): java.util.Map[String, String] = delegate.properties()
+    override def capabilities(): java.util.Set[TableCapability] = {
+      val caps = new java.util.HashSet(delegate.capabilities())
+      caps.remove(OVERWRITE_DYNAMIC)
+      caps
+    }
+    override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder =
+      delegate.asInstanceOf[SupportsRead].newScanBuilder(options)
+    override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder =
+      delegate.asInstanceOf[SupportsWrite].newWriteBuilder(info)
   }
 }
 
