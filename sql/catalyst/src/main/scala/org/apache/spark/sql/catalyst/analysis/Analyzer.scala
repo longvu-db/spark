@@ -1152,6 +1152,56 @@ class Analyzer(
   object ResolveInsertInto extends ResolveInsertionBase {
     override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsWithPruning(
       AlwaysProcess.fn, ruleId) {
+      // When INSERT REPLACE USING columns match the full set of partition columns of a V2
+      // table, convert to OverwritePartitionsDynamic. This allows any V2 connector that
+      // implements SupportsDynamicOverwrite (e.g., Delta, Iceberg) to handle REPLACE USING.
+      // The write option `useNullIntolerantEqualityWithDPO=true` is passed so connectors
+      // can implement null-intolerant equality semantics (NULL != NULL).
+      case i: InsertIntoStatement
+          if i.table.isInstanceOf[DataSourceV2Relation] &&
+            i.query.resolved &&
+            i.replaceCriteriaOpt.exists(_.isInstanceOf[InsertReplaceUsing]) && {
+            val r = i.table.asInstanceOf[DataSourceV2Relation]
+            val cols = i.replaceCriteriaOpt.get.asInstanceOf[InsertReplaceUsing].cols
+            val partCols = partitionColumnNames(r.table)
+            partCols.nonEmpty &&
+              cols.length == partCols.length &&
+              cols.forall(c => partCols.exists(p => conf.resolver(c, p)))
+          } =>
+        val r = i.table.asInstanceOf[DataSourceV2Relation]
+        val cols = i.replaceCriteriaOpt.get.asInstanceOf[InsertReplaceUsing].cols
+        // Validate that each REPLACE USING column exists in the table and query schemas.
+        cols.foreach { col =>
+          if (!r.output.exists(attr => conf.resolver(attr.name, col))) {
+            throw QueryCompilationErrors.unresolvedColumnError(
+              colName = col,
+              fields = r.schema.fieldNames)
+          }
+          if (!i.query.output.exists(attr => conf.resolver(attr.name, col))) {
+            throw QueryCompilationErrors.unresolvedColumnError(
+              colName = col,
+              fields = i.query.schema.fieldNames)
+          }
+        }
+
+        val writeOptions: Map[String, String] =
+          Map("useNullIntolerantEqualityWithDPO" -> "true") ++
+          (if (i.withSchemaEvolution) Map("mergeSchema" -> "true") else Map.empty)
+        if (i.byName) {
+          OverwritePartitionsDynamic.byName(
+            table = r,
+            df = i.query,
+            writeOptions = writeOptions,
+            withSchemaEvolution = i.withSchemaEvolution)
+        } else {
+          OverwritePartitionsDynamic.byPosition(
+            table = r,
+            query = i.query,
+            writeOptions = writeOptions,
+            withSchemaEvolution = i.withSchemaEvolution)
+        }
+
+      // All other REPLACE ON/USING variants are unsupported for V2 tables.
       case i: InsertIntoStatement
           if i.table.isInstanceOf[DataSourceV2Relation] &&
             i.query.resolved &&
