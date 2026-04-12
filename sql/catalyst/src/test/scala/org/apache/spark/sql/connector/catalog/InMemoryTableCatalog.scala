@@ -182,6 +182,14 @@ class BasicInMemoryTableCatalog extends TableCatalog {
 
     table.increaseVersion()
     val currentVersion = table.version()
+    // Extract rename mappings so alterTableWithData can track renamed
+    // columns (newName -> oldName). Without this, name-based row
+    // adaptation would null out renamed columns.
+    val renames: Map[String, String] = changes.collect {
+      case r: TableChange.RenameColumn =>
+        r.newName() -> r.fieldNames().last
+    }.toMap
+
     val newTable = table match {
       case _: InMemoryTable =>
         new InMemoryTable(
@@ -191,14 +199,14 @@ class BasicInMemoryTableCatalog extends TableCatalog {
           properties = properties,
           constraints = constraints,
           id = table.id)
-          .alterTableWithData(table.data, schema)
+          .alterTableWithData(table.data, schema, renames)
       case _: InMemoryTableWithV2Filter =>
         new InMemoryTableWithV2Filter(
           name = table.name,
           columns = CatalogV2Util.structTypeToV2Columns(schema),
           partitioning = finalPartitioning,
           properties = properties)
-          .alterTableWithData(table.data, schema)
+          .alterTableWithData(table.data, schema, renames)
     }
     newTable.setVersion(currentVersion)
     changes.foreach {
