@@ -2185,13 +2185,10 @@ class DataSourceV2DataFrameSuite
   }
 
   // Scenario 1: external write after CACHE TABLE is invisible (cache pinned).
-  // Scenario 2: session write invalidates cache; subsequent external write
-  // is again invisible.
-  test("SPARK-54022: CACHE TABLE pins state; session write invalidates, external does not") {
+  test("SPARK-54022: cached table pinned against external data write") {
     val t = "testcat.ns1.ns2.tbl"
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
     withTable(t) {
-      // create a table and insert initial data
       sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
       sql(s"INSERT INTO $t VALUES (1, 100)")
 
@@ -2200,32 +2197,56 @@ class DataSourceV2DataFrameSuite
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100)))
 
-      // Scenario 1: external writer adds (2, 200) via direct catalog API
+      // external writer adds (2, 200) via direct catalog API
       // (bypasses this session's CacheManager)
       val schema = StructType.fromDDL("id INT, salary INT")
-      val extTable = catalog("testcat").loadTable(ident).asInstanceOf[InMemoryBaseTable]
+      val extTable = catalog("testcat").loadTable(ident,
+        util.Set.of(TableWritePrivilege.INSERT)).asInstanceOf[InMemoryBaseTable]
       extTable.withData(Array(
         new BufferedRows(Seq.empty, schema).withRow(InternalRow(2, 200))))
 
-      // query the table again: cache is pinned, external write invisible
+      // cache is pinned, external write invisible
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100)))
 
-      // Scenario 2: session write invalidates the cache entry
+      // REFRESH TABLE picks up external write
+      sql(s"REFRESH TABLE $t")
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100), Row(2, 200)))
+    }
+  }
+
+  // Scenario 2: session write invalidates cache; subsequent external write
+  // is again invisible.
+  test("SPARK-54022: session write invalidates cache, then external write invisible") {
+    val t = "testcat.ns1.ns2.tbl"
+    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 100)")
+
+      // cache the table
+      spark.table(t).cache()
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100)))
+
+      // session write invalidates the cache entry
       sql(s"INSERT INTO $t VALUES (2, 200)")
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100), Row(2, 200)))
 
       // external writer adds (3, 300) via direct catalog API
-      val extTable2 = catalog("testcat").loadTable(ident).asInstanceOf[InMemoryBaseTable]
-      extTable2.withData(Array(
+      val schema = StructType.fromDDL("id INT, salary INT")
+      val extTable = catalog("testcat").loadTable(ident,
+        util.Set.of(TableWritePrivilege.INSERT)).asInstanceOf[InMemoryBaseTable]
+      extTable.withData(Array(
         new BufferedRows(Seq.empty, schema).withRow(InternalRow(3, 300))))
 
-      // query the table again: cache is re-pinned, external write invisible
+      // cache is re-pinned, external write invisible
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100), Row(2, 200)))
 
-      // REFRESH TABLE picks up all external changes
+      // REFRESH TABLE picks up external write
       sql(s"REFRESH TABLE $t")
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100), Row(2, 200), Row(3, 300)))
@@ -2254,7 +2275,8 @@ class DataSourceV2DataFrameSuite
 
       // external writer adds (2, 200, -1)
       val schema3 = StructType.fromDDL("id INT, salary INT, new_column INT")
-      val extTable = catalog("testcat").loadTable(ident).asInstanceOf[InMemoryBaseTable]
+      val extTable = catalog("testcat").loadTable(ident,
+        util.Set.of(TableWritePrivilege.INSERT)).asInstanceOf[InMemoryBaseTable]
       extTable.withData(Array(
         new BufferedRows(Seq.empty, schema3).withRow(InternalRow(2, 200, -1))))
 
@@ -2293,7 +2315,8 @@ class DataSourceV2DataFrameSuite
       // external writer adds (2, 200, -1) via direct catalog API
       // (bypasses this session's CacheManager)
       val schema3 = StructType.fromDDL("id INT, salary INT, new_column INT")
-      val extTable = catalog("testcat").loadTable(ident).asInstanceOf[InMemoryBaseTable]
+      val extTable = catalog("testcat").loadTable(ident,
+        util.Set.of(TableWritePrivilege.INSERT)).asInstanceOf[InMemoryBaseTable]
       extTable.withData(Array(
         new BufferedRows(Seq.empty, schema3).withRow(InternalRow(2, 200, -1))))
 
