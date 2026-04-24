@@ -2224,6 +2224,11 @@ class DataSourceV2DataFrameSuite
       // query the table again: cache is re-pinned, external write invisible
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100), Row(2, 200)))
+
+      // REFRESH TABLE picks up all external changes
+      sql(s"REFRESH TABLE $t")
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100), Row(2, 200), Row(3, 300)))
     }
   }
 
@@ -2256,6 +2261,11 @@ class DataSourceV2DataFrameSuite
       // cache stays pinned at original 2-column schema
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100)))
+
+      // REFRESH TABLE picks up external schema change and data
+      sql(s"REFRESH TABLE $t")
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100, null), Row(2, 200, -1)))
     }
   }
 
@@ -2290,6 +2300,11 @@ class DataSourceV2DataFrameSuite
       // external write invisible: cache still shows (1, 100, null)
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100, null)))
+
+      // REFRESH TABLE picks up external write
+      sql(s"REFRESH TABLE $t")
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100, null), Row(2, 200, -1)))
     }
   }
 
@@ -2317,6 +2332,10 @@ class DataSourceV2DataFrameSuite
         properties = Collections.emptyMap[String, String])
 
       // query sees the new empty table
+      checkAnswer(spark.table(t), Seq.empty)
+
+      // REFRESH TABLE on the new empty table
+      sql(s"REFRESH TABLE $t")
       checkAnswer(spark.table(t), Seq.empty)
     }
   }
