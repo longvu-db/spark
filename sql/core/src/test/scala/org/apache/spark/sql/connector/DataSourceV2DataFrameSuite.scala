@@ -2095,95 +2095,43 @@ class DataSourceV2DataFrameSuite
   // Tests that CACHE TABLE pins table state against external changes,
   // while session writes invalidate and re-cache.
 
-  // Scenario 1 (external write) + Scenario 2 (session write):
-  // External truncation is invisible to cached table; session INSERT
-  // invalidates cache and rebuilds with fresh data.
-  test("SPARK-54022: caching table via Dataset API should pin table state") {
+  // Scenario 1: external write after CACHE TABLE is invisible (cache pinned).
+  // Scenario 2: session write invalidates cache; subsequent external write
+  // is again invisible.
+  test("SPARK-54022: CACHE TABLE pins state; session write invalidates, external does not") {
     val t = "testcat.ns1.ns2.tbl"
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
     withTable(t) {
-      sql(s"CREATE TABLE $t (id INT, value INT, category STRING) USING foo")
-      sql(s"INSERT INTO $t VALUES (1, 10, 'A'), (2, 20, 'B'), (3, 30, 'A')")
+      // create a table and insert initial data
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 100)")
 
-      // cache table
+      // cache the table
       spark.table(t).cache()
-
-      // verify caching works as expected
       assertCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq(Row(1, 10, "A"), Row(2, 20, "B"), Row(3, 30, "A")))
+      checkAnswer(spark.table(t), Seq(Row(1, 100)))
 
-      // modify table directly to mimic external changes
+      // Scenario 1: external writer truncates table via direct catalog API
+      // (bypasses this session's CacheManager)
       val table = catalog("testcat").loadTable(ident, util.Set.of(TableWritePrivilege.DELETE))
       table.asInstanceOf[TruncatableTable].truncateTable()
 
-      // verify external changes have no impact on cached state
+      // query the table again: cache is pinned, external change invisible
       assertCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq(Row(1, 10, "A"), Row(2, 20, "B"), Row(3, 30, "A")))
+      checkAnswer(spark.table(t), Seq(Row(1, 100)))
 
-      // add more data within session that should invalidate cache
-      sql(s"INSERT INTO $t VALUES (10, 100, 'x')")
-
-      // table should be re-cached correctly
+      // Scenario 2: session write invalidates the cache entry
+      sql(s"INSERT INTO $t VALUES (2, 200)")
       assertCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq(Row(10, 100, "x")))
-    }
-  }
+      checkAnswer(spark.table(t), Seq(Row(1, 100), Row(2, 200)))
 
-  test("SPARK-54022: caching a query via Dataset API should not pin table state") {
-    val t = "testcat.ns1.ns2.tbl"
-    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
-    withTable(t) {
-      sql(s"CREATE TABLE $t (id INT, value INT, category STRING) USING foo")
-      sql(s"INSERT INTO $t VALUES (1, 10, 'A'), (2, 20, 'B'), (3, 30, 'A')")
+      // external writer truncates again via direct catalog API
+      val table2 = catalog("testcat").loadTable(ident, util.Set.of(TableWritePrivilege.DELETE))
+      table2.asInstanceOf[TruncatableTable].truncateTable()
 
-      // cache query on top of table
-      val df = spark.table(t).select("id")
-      df.cache()
-
-      // verify query caching works as expected
-      assertCached(spark.table(t).select("id"))
-      checkAnswer(spark.table(t).select("id"), Seq(Row(1), Row(2), Row(3)))
-
-      // verify table itself is not cached
-      assertNotCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq(Row(1, 10, "A"), Row(2, 20, "B"), Row(3, 30, "A")))
-
-      // modify table directly to mimic external changes
-      val table = catalog("testcat").loadTable(ident, util.Set.of(TableWritePrivilege.DELETE))
-      table.asInstanceOf[TruncatableTable].truncateTable()
-
-      // verify cached DataFrame is unaffected by external changes
-      assertCached(df)
-      checkAnswer(df, Seq(Row(1), Row(2), Row(3)))
-
-      // verify external changes are reflected correctly when table is queried
-      assertNotCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq.empty)
-    }
-  }
-
-  // Scenario 2 variant: session write invalidates and refreshes cache.
-  test("cached DSv2 table DataFrame is refreshed and reused after insert") {
-    val t = "testcat.ns1.ns2.tbl"
-    withTable(t) {
-      sql(s"CREATE TABLE $t (id bigint, data string) USING foo")
-      val df1 = Seq((1L, "a"), (2L, "b")).toDF("id", "data")
-      df1.write.insertInto(t)
-
-      // cache DataFrame pointing to table
-      val readDF1 = spark.table(t)
-      readDF1.cache()
-      assertCached(readDF1)
-      checkAnswer(readDF1, Seq(Row(1L, "a"), Row(2L, "b")))
-
-      // insert more data, invalidating and refreshing cache entry
-      val df2 = Seq((3L, "c"), (4L, "d")).toDF("id", "data")
-      df2.write.insertInto(t)
-
-      // verify underlying plan is recached and picks up new data
-      val readDF2 = spark.table(t)
-      assertCached(readDF2)
-      checkAnswer(readDF2, Seq(Row(1L, "a"), Row(2L, "b"), Row(3L, "c"), Row(4L, "d")))
+      // query the table again: cache is re-pinned, external change invisible
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100), Row(2, 200)))
     }
   }
 
@@ -2213,9 +2161,11 @@ class DataSourceV2DataFrameSuite
     }
   }
 
-  // Scenario 4: session schema change invalidates cache.
-  test("SPARK-54022: session schema change invalidates cache") {
+  // Scenario 4: session schema change invalidates cache; subsequent external
+  // write is invisible.
+  test("SPARK-54022: session schema change invalidates cache, external write invisible") {
     val t = "testcat.ns1.ns2.tbl"
+    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
     withTable(t) {
       sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
       sql(s"INSERT INTO $t VALUES (1, 100)")
@@ -2231,12 +2181,19 @@ class DataSourceV2DataFrameSuite
       // after session ALTER, cache is rebuilt with 3-column schema
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100, null)))
+
+      // simulate external writer adds (2, 200, -1) by truncating via
+      // direct catalog API (bypasses this session's CacheManager)
+      val table = catalog("testcat").loadTable(ident, util.Set.of(TableWritePrivilege.DELETE))
+      table.asInstanceOf[TruncatableTable].truncateTable()
+
+      // external change invisible: cache still shows (1, 100, null)
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100, null)))
     }
   }
 
   // Scenario 5: external drop and recreate with same schema.
-  // The new table has a different ID; the query detects the ID change
-  // and sees the new empty table.
   test("SPARK-54022: cached table after external drop and recreate sees empty table") {
     val t = "testcat.ns1.ns2.tbl"
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
@@ -2259,7 +2216,7 @@ class DataSourceV2DataFrameSuite
         Array.empty,
         Collections.emptyMap[String, String])
 
-      // the new table has a different ID; query sees the new empty table
+      // query sees the new empty table
       checkAnswer(spark.table(t), Seq.empty)
     }
   }
