@@ -1759,94 +1759,6 @@ class DataSourceV2DataFrameSuite
     }
   }
 
-  test("cached DSv2 table DataFrame is refreshed and reused after insert") {
-    val t = "testcat.ns1.ns2.tbl"
-    withTable(t) {
-      sql(s"CREATE TABLE $t (id bigint, data string) USING foo")
-      val df1 = Seq((1L, "a"), (2L, "b")).toDF("id", "data")
-      df1.write.insertInto(t)
-
-      // cache DataFrame pointing to table
-      val readDF1 = spark.table(t)
-      readDF1.cache()
-      assertCached(readDF1)
-      checkAnswer(readDF1, Seq(Row(1L, "a"), Row(2L, "b")))
-
-      // insert more data, invalidating and refreshing cache entry
-      val df2 = Seq((3L, "c"), (4L, "d")).toDF("id", "data")
-      df2.write.insertInto(t)
-
-      // verify underlying plan is recached and picks up new data
-      val readDF2 = spark.table(t)
-      assertCached(readDF2)
-      checkAnswer(readDF2, Seq(Row(1L, "a"), Row(2L, "b"), Row(3L, "c"), Row(4L, "d")))
-    }
-  }
-
-  test("SPARK-54022: caching table via Dataset API should pin table state") {
-    val t = "testcat.ns1.ns2.tbl"
-    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
-    withTable(t) {
-      sql(s"CREATE TABLE $t (id INT, value INT, category STRING) USING foo")
-      sql(s"INSERT INTO $t VALUES (1, 10, 'A'), (2, 20, 'B'), (3, 30, 'A')")
-
-      // cache table
-      spark.table(t).cache()
-
-      // verify caching works as expected
-      assertCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq(Row(1, 10, "A"), Row(2, 20, "B"), Row(3, 30, "A")))
-
-      // modify table directly to mimic external changes
-      val table = catalog("testcat").loadTable(ident, util.Set.of(TableWritePrivilege.DELETE))
-      table.asInstanceOf[TruncatableTable].truncateTable()
-
-      // verify external changes have no impact on cached state
-      assertCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq(Row(1, 10, "A"), Row(2, 20, "B"), Row(3, 30, "A")))
-
-      // add more data within session that should invalidate cache
-      sql(s"INSERT INTO $t VALUES (10, 100, 'x')")
-
-      // table should be re-cached correctly
-      assertCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq(Row(10, 100, "x")))
-    }
-  }
-
-  test("SPARK-54022: caching a query via Dataset API should not pin table state") {
-    val t = "testcat.ns1.ns2.tbl"
-    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
-    withTable(t) {
-      sql(s"CREATE TABLE $t (id INT, value INT, category STRING) USING foo")
-      sql(s"INSERT INTO $t VALUES (1, 10, 'A'), (2, 20, 'B'), (3, 30, 'A')")
-
-      // cache query on top of table
-      val df = spark.table(t).select("id")
-      df.cache()
-
-      // verify query caching works as expected
-      assertCached(spark.table(t).select("id"))
-      checkAnswer(spark.table(t).select("id"), Seq(Row(1), Row(2), Row(3)))
-
-      // verify table itself is not cached
-      assertNotCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq(Row(1, 10, "A"), Row(2, 20, "B"), Row(3, 30, "A")))
-
-      // modify table directly to mimic external changes
-      val table = catalog("testcat").loadTable(ident, util.Set.of(TableWritePrivilege.DELETE))
-      table.asInstanceOf[TruncatableTable].truncateTable()
-
-      // verify cached DataFrame is unaffected by external changes
-      assertCached(df)
-      checkAnswer(df, Seq(Row(1), Row(2), Row(3)))
-
-      // verify external changes are reflected correctly when table is queried
-      assertNotCached(spark.table(t))
-      checkAnswer(spark.table(t), Seq.empty)
-    }
-  }
-
   test("SPARK-54504: self-subquery refreshes both table references before execution") {
     val t = "testcat.ns1.ns2.tbl"
     withTable(t) {
@@ -2176,6 +2088,179 @@ class DataSourceV2DataFrameSuite
       }
     } finally {
       spark.listenerManager.unregister(listener)
+    }
+  }
+
+  // Design doc Section [5]: CACHE TABLE impact on reads.
+  // Tests that CACHE TABLE pins table state against external changes,
+  // while session writes invalidate and re-cache.
+
+  // Scenario 1 (external write) + Scenario 2 (session write):
+  // External truncation is invisible to cached table; session INSERT
+  // invalidates cache and rebuilds with fresh data.
+  test("SPARK-54022: caching table via Dataset API should pin table state") {
+    val t = "testcat.ns1.ns2.tbl"
+    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, value INT, category STRING) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 10, 'A'), (2, 20, 'B'), (3, 30, 'A')")
+
+      // cache table
+      spark.table(t).cache()
+
+      // verify caching works as expected
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 10, "A"), Row(2, 20, "B"), Row(3, 30, "A")))
+
+      // modify table directly to mimic external changes
+      val table = catalog("testcat").loadTable(ident, util.Set.of(TableWritePrivilege.DELETE))
+      table.asInstanceOf[TruncatableTable].truncateTable()
+
+      // verify external changes have no impact on cached state
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 10, "A"), Row(2, 20, "B"), Row(3, 30, "A")))
+
+      // add more data within session that should invalidate cache
+      sql(s"INSERT INTO $t VALUES (10, 100, 'x')")
+
+      // table should be re-cached correctly
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(10, 100, "x")))
+    }
+  }
+
+  test("SPARK-54022: caching a query via Dataset API should not pin table state") {
+    val t = "testcat.ns1.ns2.tbl"
+    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, value INT, category STRING) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 10, 'A'), (2, 20, 'B'), (3, 30, 'A')")
+
+      // cache query on top of table
+      val df = spark.table(t).select("id")
+      df.cache()
+
+      // verify query caching works as expected
+      assertCached(spark.table(t).select("id"))
+      checkAnswer(spark.table(t).select("id"), Seq(Row(1), Row(2), Row(3)))
+
+      // verify table itself is not cached
+      assertNotCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 10, "A"), Row(2, 20, "B"), Row(3, 30, "A")))
+
+      // modify table directly to mimic external changes
+      val table = catalog("testcat").loadTable(ident, util.Set.of(TableWritePrivilege.DELETE))
+      table.asInstanceOf[TruncatableTable].truncateTable()
+
+      // verify cached DataFrame is unaffected by external changes
+      assertCached(df)
+      checkAnswer(df, Seq(Row(1), Row(2), Row(3)))
+
+      // verify external changes are reflected correctly when table is queried
+      assertNotCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq.empty)
+    }
+  }
+
+  // Scenario 2 variant: session write invalidates and refreshes cache.
+  test("cached DSv2 table DataFrame is refreshed and reused after insert") {
+    val t = "testcat.ns1.ns2.tbl"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id bigint, data string) USING foo")
+      val df1 = Seq((1L, "a"), (2L, "b")).toDF("id", "data")
+      df1.write.insertInto(t)
+
+      // cache DataFrame pointing to table
+      val readDF1 = spark.table(t)
+      readDF1.cache()
+      assertCached(readDF1)
+      checkAnswer(readDF1, Seq(Row(1L, "a"), Row(2L, "b")))
+
+      // insert more data, invalidating and refreshing cache entry
+      val df2 = Seq((3L, "c"), (4L, "d")).toDF("id", "data")
+      df2.write.insertInto(t)
+
+      // verify underlying plan is recached and picks up new data
+      val readDF2 = spark.table(t)
+      assertCached(readDF2)
+      checkAnswer(readDF2, Seq(Row(1L, "a"), Row(2L, "b"), Row(3L, "c"), Row(4L, "d")))
+    }
+  }
+
+  // Scenario 3: external schema change after CACHE TABLE.
+  // Cache stays pinned at original 2-column schema; external ADD COLUMN
+  // is invisible.
+  test("SPARK-54022: cached table pinned against external schema change") {
+    val t = "testcat.ns1.ns2.tbl"
+    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 100)")
+
+      // cache table
+      spark.table(t).cache()
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100)))
+
+      // simulate external schema change via direct catalog API
+      // (bypasses this session's CacheManager)
+      val addCol = TableChange.addColumn(Array("new_column"), IntegerType, true)
+      catalog("testcat").alterTable(ident, addCol)
+
+      // cache stays pinned at original 2-column schema
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100)))
+    }
+  }
+
+  // Scenario 4: session schema change invalidates cache.
+  test("SPARK-54022: session schema change invalidates cache") {
+    val t = "testcat.ns1.ns2.tbl"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 100)")
+
+      // cache table
+      spark.table(t).cache()
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100)))
+
+      // session schema change: invalidates cache, rebuilds with new schema
+      sql(s"ALTER TABLE $t ADD COLUMN new_column INT")
+
+      // after session ALTER, cache is rebuilt with 3-column schema
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100, null)))
+    }
+  }
+
+  // Scenario 5: external drop and recreate with same schema.
+  // The new table has a different ID; the query detects the ID change
+  // and sees the new empty table.
+  test("SPARK-54022: cached table after external drop and recreate sees empty table") {
+    val t = "testcat.ns1.ns2.tbl"
+    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 100)")
+
+      // cache table
+      spark.table(t).cache()
+      assertCached(spark.table(t))
+      checkAnswer(spark.table(t), Seq(Row(1, 100)))
+
+      // simulate external drop and recreate with same schema
+      catalog("testcat").dropTable(ident)
+      catalog("testcat").createTable(
+        ident,
+        Array(
+          Column.create("id", IntegerType),
+          Column.create("salary", IntegerType)),
+        Array.empty,
+        Collections.emptyMap[String, String])
+
+      // the new table has a different ID; query sees the new empty table
+      checkAnswer(spark.table(t), Seq.empty)
     }
   }
 }
