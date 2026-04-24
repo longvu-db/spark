@@ -2091,7 +2091,7 @@ class DataSourceV2DataFrameSuite
     }
   }
 
-  // Design doc Section [5]: CACHE TABLE impact on reads.
+  // CACHE TABLE impact on reads.
   // Tests that CACHE TABLE pins table state against external changes,
   // while session writes invalidate and re-cache.
 
