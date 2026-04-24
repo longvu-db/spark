@@ -2242,10 +2242,16 @@ class DataSourceV2DataFrameSuite
       assertCached(spark.table(t))
       checkAnswer(spark.table(t), Seq(Row(1, 100)))
 
-      // simulate external schema change via direct catalog API
+      // simulate external schema change + data write via direct catalog API
       // (bypasses this session's CacheManager)
       val addCol = TableChange.addColumn(Array("new_column"), IntegerType, true)
       catalog("testcat").alterTable(ident, addCol)
+
+      // external writer adds (2, 200, -1)
+      val schema3 = StructType.fromDDL("id INT, salary INT, new_column INT")
+      val extTable = catalog("testcat").loadTable(ident).asInstanceOf[InMemoryBaseTable]
+      extTable.withData(Array(
+        new BufferedRows(Seq.empty, schema3).withRow(InternalRow(2, 200, -1))))
 
       // cache stays pinned at original 2-column schema
       assertCached(spark.table(t))
