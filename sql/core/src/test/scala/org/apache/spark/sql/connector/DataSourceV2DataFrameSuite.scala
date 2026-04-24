@@ -25,6 +25,7 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.{SparkConf, SparkException}
 import org.apache.spark.sql.{AnalysisException, DataFrame, Row, SaveMode}
 import org.apache.spark.sql.QueryTest.withQueryExecutionsCaptured
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException
 import org.apache.spark.sql.catalyst.plans.logical.{AppendData, CreateTableAsSelect, LogicalPlan, ReplaceTableAsSelect}
 import org.apache.spark.sql.connector.catalog.{BufferedRows, Column, ColumnDefaultValue, DefaultValue, Identifier, InMemoryBaseTable, InMemoryTableCatalog, SupportsV1OverwriteWithSaveAsTable, TableInfo}
@@ -40,7 +41,6 @@ import org.apache.spark.sql.execution.ExplainUtils.stripAQEPlan
 import org.apache.spark.sql.execution.datasources.v2.{AlterTableExec, CreateTableExec, DataSourceV2Relation, ReplaceTableExec}
 import org.apache.spark.sql.functions.lit
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.{BooleanType, CalendarIntervalType, DoubleType, IntegerType, StringType, StructType, TimestampType}
 import org.apache.spark.sql.util.QueryExecutionListener
 import org.apache.spark.unsafe.types.UTF8String
