@@ -2303,12 +2303,12 @@ class DataSourceV2DataFrameSuite
       // simulate external drop and recreate with same schema
       catalog("testcat").dropTable(ident)
       catalog("testcat").createTable(
-        ident,
-        Array(
+        ident = ident,
+        columns = Array(
           Column.create("id", IntegerType),
           Column.create("salary", IntegerType)),
-        Array.empty,
-        Collections.emptyMap[String, String])
+        partitions = Array.empty,
+        properties = Collections.emptyMap[String, String])
 
       // query sees the new empty table
       checkAnswer(spark.table(t), Seq.empty)
