@@ -1915,16 +1915,20 @@ class DataSourceV2DataFrameSuite
       sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
 
       spark.table(t).filter("salary < 999").createOrReplaceTempView("v")
+      spark.table(t).createOrReplaceTempView("v_unfiltered")
       checkAnswer(spark.table("v"), Seq(Row(1, 100)))
 
       // drop and re-add column with same name and type
       sql(s"ALTER TABLE $t DROP COLUMN salary")
       sql(s"ALTER TABLE $t ADD COLUMN salary INT")
 
-      // schema validation passes (same column names and types)
       // salary data is no longer preserved after drop and re-add
       // null < 999 evaluates to null (falsy), so no rows pass the filter
       checkAnswer(spark.table("v"), Seq.empty)
+      // unfiltered view shows all rows with null salary
+      checkAnswer(
+        spark.table("v_unfiltered"),
+        Seq(Row(1, null), Row(10, null)))
     }
   }
 
@@ -1936,6 +1940,7 @@ class DataSourceV2DataFrameSuite
       sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
 
       spark.table(t).filter("salary < 999").createOrReplaceTempView("v")
+      spark.table(t).createOrReplaceTempView("v_unfiltered")
       checkAnswer(spark.table("v"), Seq(Row(1, 100)))
 
       // external drop and re-add column via catalog API
@@ -1943,9 +1948,12 @@ class DataSourceV2DataFrameSuite
       val addCol = TableChange.addColumn(Array("salary"), IntegerType, true)
       catalog("testcat").alterTable(ident, dropCol, addCol)
 
-      // schema validation passes (same column names and types)
       // salary data is no longer preserved after drop and re-add
       checkAnswer(spark.table("v"), Seq.empty)
+      // unfiltered view shows all rows with null salary
+      checkAnswer(
+        spark.table("v_unfiltered"),
+        Seq(Row(1, null), Row(10, null)))
     }
   }
 
