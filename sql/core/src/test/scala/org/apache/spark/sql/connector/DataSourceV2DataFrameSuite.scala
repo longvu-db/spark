@@ -1844,6 +1844,28 @@ class DataSourceV2DataFrameSuite
     }
   }
 
+  test("temp view with stored plan detects session column removal") {
+    val t = "testcat.ns1.ns2.tbl"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
+
+      spark.table(t).filter("salary < 999").createOrReplaceTempView("v")
+      checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+
+      sql(s"ALTER TABLE $t DROP COLUMN salary")
+
+      checkError(
+        exception = intercept[AnalysisException] { spark.table("v").collect() },
+        condition = "INCOMPATIBLE_COLUMN_CHANGES_AFTER_VIEW_WITH_PLAN_CREATION",
+        parameters = Map(
+          "viewName" -> "`v`",
+          "tableName" -> "`testcat`.`ns1`.`ns2`.`tbl`",
+          "colType" -> "data",
+          "errors" -> "- `salary` INT has been removed"))
+    }
+  }
+
   test("temp view with stored plan detects external column removal") {
     val t = "testcat.ns1.ns2.tbl"
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
@@ -1866,6 +1888,28 @@ class DataSourceV2DataFrameSuite
           "tableName" -> "`testcat`.`ns1`.`ns2`.`tbl`",
           "colType" -> "data",
           "errors" -> "- `salary` INT has been removed"))
+    }
+  }
+
+  test("temp view with stored plan resolves to session recreated table") {
+    val t = "testcat.ns1.ns2.tbl"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
+
+      spark.table(t).filter("salary < 999").createOrReplaceTempView("v")
+      checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+
+      // drop and recreate table via session SQL
+      sql(s"DROP TABLE $t")
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+
+      // view resolves to the new empty table
+      checkAnswer(spark.table("v"), Seq.empty)
+
+      // insert new data and verify the view picks it up
+      sql(s"INSERT INTO $t VALUES (2, 200)")
+      checkAnswer(spark.table("v"), Seq(Row(2, 200)))
     }
   }
 
@@ -1907,18 +1951,20 @@ class DataSourceV2DataFrameSuite
     val t = "testcat.ns1.ns2.tbl"
     withTable(t) {
       sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
-      sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
+      sql(s"INSERT INTO $t VALUES (1, 100)")
 
-      spark.table(t).filter("salary < 999").createOrReplaceTempView("v")
+      // No filter: we want to observe the null salary after drop+re-add.
+      spark.table(t).createOrReplaceTempView("v")
       checkAnswer(spark.table("v"), Seq(Row(1, 100)))
 
       // drop and re-add column with same name and type
       sql(s"ALTER TABLE $t DROP COLUMN salary")
       sql(s"ALTER TABLE $t ADD COLUMN salary INT")
 
-      // schema validation passes (same column names and types)
-      // InMemoryTable preserves row data through ALTER chain
-      checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+      // Schema validation passes (same column names and types).
+      // The re-added salary column has no data (old column data was discarded
+      // on DROP), so the view returns null for salary.
+      checkAnswer(spark.table("v"), Seq(Row(1, null)))
     }
   }
 
@@ -1927,18 +1973,23 @@ class DataSourceV2DataFrameSuite
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
     withTable(t) {
       sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
-      sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
+      sql(s"INSERT INTO $t VALUES (1, 100)")
 
-      spark.table(t).filter("salary < 999").createOrReplaceTempView("v")
+      // No filter: we want to observe the null salary after drop+re-add.
+      spark.table(t).createOrReplaceTempView("v")
       checkAnswer(spark.table("v"), Seq(Row(1, 100)))
 
-      // external drop and re-add column via catalog API
+      // external drop and re-add column via separate catalog API calls
+      // (two calls, not one, to simulate two separate DDL operations)
       val dropCol = TableChange.deleteColumn(Array("salary"), false)
+      catalog("testcat").alterTable(ident, dropCol)
       val addCol = TableChange.addColumn(Array("salary"), IntegerType, true)
-      catalog("testcat").alterTable(ident, dropCol, addCol)
+      catalog("testcat").alterTable(ident, addCol)
 
-      // schema validation passes (same column names and types)
-      checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+      // Schema validation passes (same column names and types).
+      // The re-added salary column has no data (old column data was discarded
+      // on DROP), so the view returns null for salary.
+      checkAnswer(spark.table("v"), Seq(Row(1, null)))
     }
   }
 
@@ -1992,7 +2043,30 @@ class DataSourceV2DataFrameSuite
     }
   }
 
-  test("temp view with stored plan detects type widening") {
+  test("temp view with stored plan detects session type widening") {
+    val t = "testcat.ns1.ns2.tbl"
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
+
+      spark.table(t).filter("salary < 999").createOrReplaceTempView("v")
+      checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+
+      // widen salary type from INT to BIGINT via session SQL
+      sql(s"ALTER TABLE $t ALTER COLUMN salary TYPE BIGINT")
+
+      checkError(
+        exception = intercept[AnalysisException] { spark.table("v").collect() },
+        condition = "INCOMPATIBLE_COLUMN_CHANGES_AFTER_VIEW_WITH_PLAN_CREATION",
+        parameters = Map(
+          "viewName" -> "`v`",
+          "tableName" -> "`testcat`.`ns1`.`ns2`.`tbl`",
+          "colType" -> "data",
+          "errors" -> "- `salary` type has changed from INT to BIGINT"))
+    }
+  }
+
+  test("temp view with stored plan detects external type widening") {
     val t = "testcat.ns1.ns2.tbl"
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
     withTable(t) {
