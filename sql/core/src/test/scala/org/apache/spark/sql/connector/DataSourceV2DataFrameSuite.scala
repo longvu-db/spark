@@ -1760,11 +1760,12 @@ class DataSourceV2DataFrameSuite
     }
   }
 
-  // Temp views with stored plans: scenarios from the DSv2 table refresh design doc.
+  // Section [1] Temp views with stored plans.
   // Each test creates a DSv2 table with initial data, builds a temp view with a filter
   // (to demonstrate that the stored plan is non-trivial), and then verifies the view
   // behavior after various table modifications (session or external).
 
+  // Scenario 1: session and external writes.
   test("temp view with stored plan reflects session write") {
     val t = "testcat.ns1.ns2.tbl"
     withTable(t) {
@@ -1801,6 +1802,7 @@ class DataSourceV2DataFrameSuite
     }
   }
 
+  // Scenario 2: adding new columns and data.
   test("temp view with stored plan preserves schema after session ADD COLUMN") {
     val t = "testcat.ns1.ns2.tbl"
     withTable(t) {
@@ -1844,6 +1846,7 @@ class DataSourceV2DataFrameSuite
     }
   }
 
+  // Scenario 3: removing existing columns.
   test("temp view with stored plan detects external column removal") {
     val t = "testcat.ns1.ns2.tbl"
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
@@ -1869,6 +1872,7 @@ class DataSourceV2DataFrameSuite
     }
   }
 
+  // Scenario 4: drop and re-create table.
   test("temp view with stored plan resolves to externally recreated table") {
     val t = "testcat.ns1.ns2.tbl"
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
@@ -1903,6 +1907,7 @@ class DataSourceV2DataFrameSuite
     }
   }
 
+  // Scenario 5: drop and re-add column with the same name and type.
   test("temp view with stored plan after session drop and re-add column same type") {
     val t = "testcat.ns1.ns2.tbl"
     withTable(t) {
@@ -1917,8 +1922,9 @@ class DataSourceV2DataFrameSuite
       sql(s"ALTER TABLE $t ADD COLUMN salary INT")
 
       // schema validation passes (same column names and types)
-      // InMemoryTable preserves row data through ALTER chain
-      checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+      // salary data is no longer preserved after drop and re-add
+      // null < 999 evaluates to null (falsy), so no rows pass the filter
+      checkAnswer(spark.table("v"), Seq.empty)
     }
   }
 
@@ -1938,10 +1944,12 @@ class DataSourceV2DataFrameSuite
       catalog("testcat").alterTable(ident, dropCol, addCol)
 
       // schema validation passes (same column names and types)
-      checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+      // salary data is no longer preserved after drop and re-add
+      checkAnswer(spark.table("v"), Seq.empty)
     }
   }
 
+  // Scenario 6: drop and re-add column with the same name but different type.
   test("temp view with stored plan detects session column type change") {
     val t = "testcat.ns1.ns2.tbl"
     withTable(t) {
@@ -1992,6 +2000,7 @@ class DataSourceV2DataFrameSuite
     }
   }
 
+  // Scenario 7: type widening from INT to BIGINT.
   test("temp view with stored plan detects type widening") {
     val t = "testcat.ns1.ns2.tbl"
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
