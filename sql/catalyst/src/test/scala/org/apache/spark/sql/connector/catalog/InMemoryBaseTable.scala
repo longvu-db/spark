@@ -383,38 +383,49 @@ abstract class InMemoryBaseTable(
     val newFieldNames = newSchema.fieldNames.toSet
     data.foreach { bufferedRow =>
       val oldSchema = bufferedRow.schema
-      val keepFields = oldSchema.fields.zipWithIndex.filter {
-        case (f, _) => newFieldNames.contains(f.name)
+
+      // Identify which columns from the old schema still exist in the new schema.
+      // Each entry is (StructField, original index in old row) so we can extract values later.
+      val fieldsRetainedInOldSchema = oldSchema.fields.zipWithIndex.filter {
+        case (oldField, _) => newFieldNames.contains(oldField.name)
       }
-      val needsShrink = keepFields.length < oldSchema.length
-      val effectiveSchema = if (needsShrink) {
-        StructType(keepFields.map(_._1))
+      val areColumnsDropped = fieldsRetainedInOldSchema.length < oldSchema.length
+
+      // Build a schema that only contains the retained columns.
+      // This becomes the write schema for the migrated rows.
+      val retainedSchemaAfterDroppedColumns = if (areColumnsDropped) {
+        StructType(fieldsRetainedInOldSchema.map(_._1))
       } else {
         oldSchema
       }
+
       bufferedRow.rows.foreach { row =>
-        val effectiveRow = if (needsShrink) {
-          new GenericInternalRow(keepFields.map { case (f, i) =>
-            row.get(i, f.dataType)
+        // Physically remove dropped column values from the row so they do not
+        // survive through ALTER chains (e.g. DROP COLUMN then ADD COLUMN same name).
+        val retainedRowAfterDroppedColumns = if (areColumnsDropped) {
+          new GenericInternalRow(fieldsRetainedInOldSchema.map {
+            case (retainedField, idx) => row.get(idx, retainedField.dataType)
           })
         } else {
           row
         }
-        // handle partition evolution by re-keying all data
-        val key = getKey(effectiveRow, newSchema)
+
+        // Re-key and store the migrated row under the new partition layout.
+        val key = getKey(retainedRowAfterDroppedColumns, newSchema)
         dataMap += dataMap.get(key)
           .map { splits =>
             val newSplits = if ((splits.last.rows.size >= numRowsPerSplit) ||
-                (splits.last.schema != effectiveSchema)) {
-              splits :+ new BufferedRows(key, effectiveSchema)
+                (splits.last.schema != retainedSchemaAfterDroppedColumns)) {
+              splits :+ new BufferedRows(key, retainedSchemaAfterDroppedColumns)
             } else {
               splits
             }
-            newSplits.last.withRow(effectiveRow)
+            newSplits.last.withRow(retainedRowAfterDroppedColumns)
             key -> newSplits
           }
           .getOrElse(key -> Seq(
-            new BufferedRows(key, effectiveSchema).withRow(effectiveRow)))
+            new BufferedRows(key, retainedSchemaAfterDroppedColumns)
+              .withRow(retainedRowAfterDroppedColumns)))
         addPartitionKey(key)
       }
     }

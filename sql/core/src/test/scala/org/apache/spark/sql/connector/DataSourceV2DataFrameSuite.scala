@@ -1760,7 +1760,7 @@ class DataSourceV2DataFrameSuite
     }
   }
 
-  // Section [1] Temp views with stored plans.
+  // Temp views with stored plans.
   // Each test creates a DSv2 table with initial data, builds a temp view with a filter
   // (to demonstrate that the stored plan is non-trivial), and then verifies the view
   // behavior after various table modifications (session or external).
