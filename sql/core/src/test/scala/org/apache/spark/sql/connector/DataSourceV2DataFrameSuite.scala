@@ -1951,11 +1951,14 @@ class DataSourceV2DataFrameSuite
     val t = "testcat.ns1.ns2.tbl"
     withTable(t) {
       sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
-      sql(s"INSERT INTO $t VALUES (1, 100)")
+      sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
 
-      // No filter: we want to observe the null salary after drop+re-add.
-      spark.table(t).createOrReplaceTempView("v")
+      val query = spark.table(t).filter("salary < 999")
+      query.createOrReplaceTempView("v")
+      val salaryQueryNoFilter = spark.table(t).select("salary")
+      salaryQueryNoFilter.createOrReplaceTempView("v_salary_no_filter")
       checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+      checkAnswer(spark.table("v_salary_no_filter"), Seq(Row(100), Row(1000)))
 
       // drop and re-add column with same name and type
       sql(s"ALTER TABLE $t DROP COLUMN salary")
@@ -1963,8 +1966,10 @@ class DataSourceV2DataFrameSuite
 
       // Schema validation passes (same column names and types).
       // The re-added salary column has no data (old column data was discarded
-      // on DROP), so the view returns null for salary.
-      checkAnswer(spark.table("v"), Seq(Row(1, null)))
+      // on DROP), so salary is null. The filter (null < 999) is false,
+      // so the filtered view returns empty.
+      checkAnswer(spark.table("v"), Seq.empty)
+      checkAnswer(spark.table("v_salary_no_filter"), Seq(Row(null), Row(null)))
     }
   }
 
@@ -1973,11 +1978,14 @@ class DataSourceV2DataFrameSuite
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
     withTable(t) {
       sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
-      sql(s"INSERT INTO $t VALUES (1, 100)")
+      sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
 
-      // No filter: we want to observe the null salary after drop+re-add.
-      spark.table(t).createOrReplaceTempView("v")
+      val query = spark.table(t).filter("salary < 999")
+      query.createOrReplaceTempView("v")
+      val salaryQueryNoFilter = spark.table(t).select("salary")
+      salaryQueryNoFilter.createOrReplaceTempView("v_salary_no_filter")
       checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+      checkAnswer(spark.table("v_salary_no_filter"), Seq(Row(100), Row(1000)))
 
       // external drop and re-add column via separate catalog API calls
       // (two calls, not one, to simulate two separate DDL operations)
@@ -1988,8 +1996,10 @@ class DataSourceV2DataFrameSuite
 
       // Schema validation passes (same column names and types).
       // The re-added salary column has no data (old column data was discarded
-      // on DROP), so the view returns null for salary.
-      checkAnswer(spark.table("v"), Seq(Row(1, null)))
+      // on DROP), so salary is null. The filter (null < 999) is false,
+      // so the filtered view returns empty.
+      checkAnswer(spark.table("v"), Seq.empty)
+      checkAnswer(spark.table("v_salary_no_filter"), Seq(Row(null), Row(null)))
     }
   }
 
