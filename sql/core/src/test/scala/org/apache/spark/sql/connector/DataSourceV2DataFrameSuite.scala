@@ -1986,10 +1986,12 @@ class DataSourceV2DataFrameSuite
       spark.table(t).createOrReplaceTempView("v_unfiltered")
       checkAnswer(spark.table("v"), Seq(Row(1, 100)))
 
-      // external drop and re-add column via catalog API
+      // external drop and re-add column via catalog API (two separate calls,
+      // matching how separate ALTER TABLE statements work in practice)
       val dropCol = TableChange.deleteColumn(Array("salary"), false)
+      catalog("testcat").alterTable(ident, dropCol)
       val addCol = TableChange.addColumn(Array("salary"), IntegerType, true)
-      catalog("testcat").alterTable(ident, dropCol, addCol)
+      catalog("testcat").alterTable(ident, addCol)
 
       // salary data is no longer preserved after drop and re-add
       checkAnswer(spark.table("v"), Seq.empty)
@@ -2037,8 +2039,9 @@ class DataSourceV2DataFrameSuite
 
       // external drop and re-add column with different type via catalog API
       val dropCol = TableChange.deleteColumn(Array("salary"), false)
+      catalog("testcat").alterTable(ident, dropCol)
       val addCol = TableChange.addColumn(Array("salary"), StringType, true)
-      catalog("testcat").alterTable(ident, dropCol, addCol)
+      catalog("testcat").alterTable(ident, addCol)
 
       checkError(
         exception = intercept[AnalysisException] { spark.table("v").collect() },
