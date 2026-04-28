@@ -2042,9 +2042,10 @@ class DataSourceV2DataFrameSuite
         matchPVals = true,
         parameters = Map("tableName" -> ".*", "errors" -> ".*salary.*"))
 
-      // a fresh DataFrame succeeds (all current column IDs are consistent)
+      // a fresh DataFrame succeeds (all current column IDs are consistent).
+      // salary is null for the old row because the DROP physically removed the data.
       sql(s"INSERT INTO $t VALUES (2, 200, 50)")
-      checkAnswer(spark.table(t), Seq(Row(1, 100, null), Row(2, 200, 50)))
+      checkAnswer(spark.table(t), Seq(Row(1, null, null), Row(2, 200, 50)))
     }
   }
 
@@ -2135,9 +2136,10 @@ class DataSourceV2DataFrameSuite
       sql(s"ALTER TABLE $t ADD COLUMN salary INT")
       sql(s"INSERT INTO $t VALUES (2, 200)")
 
+      // salary is null for the old row because the DROP physically removed the data
       checkAnswer(
         spark.sql("SELECT * FROM tmp_view"),
-        Seq(Row(1, 100), Row(2, 200)))
+        Seq(Row(1, null), Row(2, 200)))
     }
   }
 
@@ -3007,6 +3009,31 @@ class DataSourceV2DataFrameSuite
       }
     } finally {
       spark.listenerManager.unregister(listener)
+    }
+  }
+
+  // Scenario 5.2 (external drop and re-add column with same type)
+  test("temp view with stored plan after external drop and re-add column same type") {
+    val t = "testcat.ns1.ns2.tbl"
+    val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
+    withTable(t) {
+      sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
+      sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
+
+      spark.table(t).filter("salary < 999").createOrReplaceTempView("v")
+      spark.table(t).createOrReplaceTempView("v_no_filter")
+      checkAnswer(spark.table("v"), Seq(Row(1, 100)))
+      checkAnswer(spark.table("v_no_filter"), Seq(Row(1, 100), Row(10, 1000)))
+
+      // external drop and re-add column via catalog API
+      val dropCol = TableChange.deleteColumn(Array("salary"), false)
+      val addCol = TableChange.addColumn(Array("salary"), IntegerType, true)
+      catalog("testcat").alterTable(ident, dropCol, addCol)
+
+      // salary values are now null, so the filtered view returns nothing
+      checkAnswer(spark.table("v"), Seq.empty)
+      // unfiltered view returns rows with null salary
+      checkAnswer(spark.table("v_no_filter"), Seq(Row(1, null), Row(10, null)))
     }
   }
 }
