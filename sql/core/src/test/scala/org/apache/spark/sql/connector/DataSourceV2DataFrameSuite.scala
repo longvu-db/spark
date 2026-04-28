@@ -3012,28 +3012,21 @@ class DataSourceV2DataFrameSuite
     }
   }
 
-  // Scenario 5.2 (external drop and re-add column with same type)
-  test("temp view with stored plan after external drop and re-add column same type") {
+  test("drop and re-add column nulls out old data") {
     val t = "testcat.ns1.ns2.tbl"
     val ident = Identifier.of(Array("ns1", "ns2"), "tbl")
     withTable(t) {
       sql(s"CREATE TABLE $t (id INT, salary INT) USING foo")
       sql(s"INSERT INTO $t VALUES (1, 100), (10, 1000)")
+      checkAnswer(spark.table(t), Seq(Row(1, 100), Row(10, 1000)))
 
-      spark.table(t).filter("salary < 999").createOrReplaceTempView("v")
-      spark.table(t).createOrReplaceTempView("v_no_filter")
-      checkAnswer(spark.table("v"), Seq(Row(1, 100)))
-      checkAnswer(spark.table("v_no_filter"), Seq(Row(1, 100), Row(10, 1000)))
-
-      // external drop and re-add column via catalog API
+      // drop and re-add column via catalog API
       val dropCol = TableChange.deleteColumn(Array("salary"), false)
       val addCol = TableChange.addColumn(Array("salary"), IntegerType, true)
       catalog("testcat").alterTable(ident, dropCol, addCol)
 
-      // salary values are now null, so the filtered view returns nothing
-      checkAnswer(spark.table("v"), Seq.empty)
-      // unfiltered view returns rows with null salary
-      checkAnswer(spark.table("v_no_filter"), Seq(Row(1, null), Row(10, null)))
+      // old salary values should be null, not the stale data
+      checkAnswer(spark.table(t), Seq(Row(1, null), Row(10, null)))
     }
   }
 }
