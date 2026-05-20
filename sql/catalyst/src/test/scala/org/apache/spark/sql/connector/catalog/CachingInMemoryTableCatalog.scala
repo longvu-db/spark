@@ -23,13 +23,9 @@ import java.util.concurrent.ConcurrentHashMap
  * An InMemoryTableCatalog that simulates a caching connector like
  * Iceberg's CachingCatalog. On first [[loadTable]], returns a fresh
  * copy. On subsequent loads, returns the CACHED (stale) copy,
- * making external changes invisible.
- *
- * Only [[loadTable]] by identifier alone is cached. Overloads that
- * take write privileges, a version, or a timestamp bypass the cache,
- * so session writes modify the underlying table directly. Cached
- * results may be stale until [[clearCache]] or REFRESH TABLE (which
- * calls [[invalidateTable]]).
+ * making external changes invisible. Cached results may be stale
+ * until [[clearCache]] or REFRESH TABLE (which calls
+ * [[invalidateTable]]).
  *
  * [[dropTable]], [[createTable]], and [[alterTable]] do not invalidate
  * the cache, matching the behavior of real caching connectors.
