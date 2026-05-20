@@ -25,11 +25,11 @@ import java.util.concurrent.ConcurrentHashMap
  * copy. On subsequent loads, returns the CACHED (stale) copy,
  * making external changes invisible.
  *
- * Only the no-arg [[loadTable]] is cached. The overload that takes
- * write privileges bypasses the cache, so session writes modify the
- * underlying table directly. Version and timestamp overloads also
- * bypass the cache. Cached results may be stale until [[clearCache]]
- * or REFRESH TABLE (which calls [[invalidateTable]]).
+ * Only [[loadTable]] by identifier alone is cached. Overloads that
+ * take write privileges, a version, or a timestamp bypass the cache,
+ * so session writes modify the underlying table directly. Cached
+ * results may be stale until [[clearCache]] or REFRESH TABLE (which
+ * calls [[invalidateTable]]).
  *
  * [[dropTable]], [[createTable]], and [[alterTable]] do not invalidate
  * the cache, matching the behavior of real caching connectors.
